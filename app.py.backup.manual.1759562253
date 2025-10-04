@@ -166,18 +166,18 @@ class Game:
         
         # Draw snake
         for i, (x, y) in enumerate(self.snake.body):
-            color = (100, 255, 100) if i == 0 else (50, 200, 50)  # Head is brighter
+            color = (0, 255, 0) if i == 0 else (0, 200, 0)  # Head is brighter
             rect = pygame.Rect(x * self.cell_size, y * self.cell_size, 
                              self.cell_size, self.cell_size)
             pygame.draw.rect(self.screen, color, rect)
-            pygame.draw.rect(self.screen, (0, 150, 0), rect, 1)  # Border
+            pygame.draw.rect(self.screen, (0, 100, 0), rect, 1)  # Border
             
         # Draw food
         x, y = self.food.position
         rect = pygame.Rect(x * self.cell_size, y * self.cell_size, 
                          self.cell_size, self.cell_size)
-        pygame.draw.rect(self.screen, (255, 100, 100), rect)
-        pygame.draw.rect(self.screen, (150, 50, 50), rect, 1)  # Border
+        pygame.draw.rect(self.screen, (255, 0, 0), rect)
+        pygame.draw.rect(self.screen, (150, 0, 0), rect, 1)  # Border
         
         # Draw score
         score_text = self.font.render(f"Score: {self.score}", True, (255, 255, 255))
