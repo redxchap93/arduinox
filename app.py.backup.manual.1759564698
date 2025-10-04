@@ -178,14 +178,11 @@ class Game:
             # Draw game over screen
             game_over_text = self.font.render("GAME OVER", True, WHITE)
             restart_text = self.font.render("Press SPACE to restart", True, WHITE)
-            score_text = self.font.render(f"Final Score: {self.snake.score}", True, WHITE)
             
-            game_over_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 40))
-            score_rect = score_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
-            restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 40))
+            game_over_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 20))
+            restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 20))
             
             self.screen.blit(game_over_text, game_over_rect)
-            self.screen.blit(score_text, score_rect)
             self.screen.blit(restart_text, restart_rect)
             
         pygame.display.flip()
