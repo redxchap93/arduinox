@@ -1,219 +1,445 @@
 import pygame
 import sys
-import logging
 import random
-from typing import Tuple, List
+import logging
+import math
+from typing import Tuple, List, Optional
+from dataclasses import dataclass
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('ai_game.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
+
 logger = logging.getLogger(__name__)
 
-# Initialize pygame
-try:
-    pygame.init()
-except pygame.error as e:
-    logger.error(f"Failed to initialize pygame: {e}")
-    sys.exit(1)
-
 # Constants
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
-GRID_SIZE = 20
-GRID_WIDTH = SCREEN_WIDTH // GRID_SIZE
-GRID_HEIGHT = SCREEN_HEIGHT // GRID_SIZE
-FPS = 10
+SCREEN_WIDTH = 1000
+SCREEN_HEIGHT = 700
+FPS = 60
+BACKGROUND_COLOR = (20, 20, 30)
+PLAYER_COLOR = (0, 200, 255)
+ENEMY_COLOR = (255, 50, 50)
+PROJECTILE_COLOR = (255, 255, 100)
+TEXT_COLOR = (255, 255, 255)
+PLAYER_SIZE = 30
+ENEMY_SIZE = 25
+PROJECTILE_SIZE = 5
+PLAYER_SPEED = 5
+ENEMY_SPEED = 3
+PROJECTILE_SPEED = 8
+MAX_PROJECTILES = 10
+SPAWN_RATE = 60  # frames between enemy spawns
+MAX_ENEMIES = 15
 
-# Colors
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
-DARK_GREEN = (0, 200, 0)
+@dataclass
+class Position:
+    x: float
+    y: float
 
-class Snake:
-    """Represents the snake in the game."""
+@dataclass
+class Velocity:
+    dx: float
+    dy: float
+
+class GameObject:
+    def __init__(self, position: Position, size: int):
+        self.position = position
+        self.size = size
+        self.velocity = Velocity(0, 0)
+        self.alive = True
     
-    def __init__(self):
-        self.reset()
+    def update(self):
+        self.position.x += self.velocity.dx
+        self.position.y += self.velocity.dy
         
-    def reset(self):
-        """Reset the snake to initial state."""
-        self.length = 3
-        self.positions = [(GRID_WIDTH // 2, GRID_HEIGHT // 2)]
-        self.direction = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0)])
-        self.score = 0
-        self.grow_pending = 2  # Start with 3 segments
-        
-    def get_head_position(self) -> Tuple[int, int]:
-        """Get the position of the snake's head."""
-        return self.positions[0]
-        
-    def update(self) -> bool:
-        """Update the snake's position and check for collisions."""
-        head = self.get_head_position()
-        x, y = self.direction
-        new_position = (((head[0] + x) % GRID_WIDTH), ((head[1] + y) % GRID_HEIGHT))
-        
-        # Check for collision with self
-        if new_position in self.positions[1:]:
-            return False
+        # Keep within bounds
+        if self.position.x < 0:
+            self.position.x = 0
+        elif self.position.x > SCREEN_WIDTH - self.size:
+            self.position.x = SCREEN_WIDTH - self.size
             
-        self.positions.insert(0, new_position)
-        
-        if self.grow_pending > 0:
-            self.grow_pending -= 1
-        else:
-            self.positions.pop()
-            
-        return True
-        
-    def grow(self):
-        """Increase the snake's length."""
-        self.grow_pending += 1
-        self.score += 10
-        
-    def render(self, surface):
-        """Draw the snake on the game surface."""
-        for i, pos in enumerate(self.positions):
-            # Draw snake segment
-            rect = pygame.Rect(pos[0] * GRID_SIZE, pos[1] * GRID_SIZE, GRID_SIZE, GRID_SIZE)
-            if i == 0:  # Head
-                pygame.draw.rect(surface, DARK_GREEN, rect)
-                pygame.draw.rect(surface, BLACK, rect, 1)
-            else:  # Body
-                pygame.draw.rect(surface, GREEN, rect)
-                pygame.draw.rect(surface, BLACK, rect, 1)
-
-class Food:
-    """Represents the food in the game."""
+        if self.position.y < 0:
+            self.position.y = 0
+        elif self.position.y > SCREEN_HEIGHT - self.size:
+            self.position.y = SCREEN_HEIGHT - self.size
     
-    def __init__(self):
-        self.position = (0, 0)
-        self.randomize_position()
-        
-    def randomize_position(self):
-        """Generate a random position for the food."""
-        self.position = (random.randint(0, GRID_WIDTH - 1), random.randint(0, GRID_HEIGHT - 1))
-        
-    def render(self, surface):
-        """Draw the food on the game surface."""
-        rect = pygame.Rect(
-            self.position[0] * GRID_SIZE,
-            self.position[1] * GRID_SIZE,
-            GRID_SIZE, GRID_SIZE
-        )
-        pygame.draw.rect(surface, RED, rect)
-        pygame.draw.rect(surface, BLACK, rect, 1)
+    def draw(self, screen):
+        pygame.draw.rect(screen, (255, 255, 255), 
+                        (self.position.x, self.position.y, self.size, self.size), 2)
+    
+    def get_rect(self) -> pygame.Rect:
+        return pygame.Rect(self.position.x, self.position.y, self.size, self.size)
+
+class Player(GameObject):
+    def __init__(self, position: Position):
+        super().__init__(position, PLAYER_SIZE)
+        self.color = PLAYER_COLOR
+        self.shoot_cooldown = 0
+    
+    def update(self):
+        super().update()
+        if self.shoot_cooldown > 0:
+            self.shoot_cooldown -= 1
+    
+    def draw(self, screen):
+        pygame.draw.rect(screen, self.color, 
+                        (self.position.x, self.position.y, self.size, self.size))
+        # Draw a simple indicator
+        pygame.draw.circle(screen, (255, 255, 255), 
+                          (int(self.position.x + self.size/2), int(self.position.y + self.size/2)), 
+                          8, 2)
+    
+    def shoot(self, target: Position) -> Optional['Projectile']:
+        if self.shoot_cooldown <= 0:
+            self.shoot_cooldown = 15
+            direction = pygame.Vector2(target.x - (self.position.x + self.size/2),
+                                     target.y - (self.position.y + self.size/2))
+            direction.scale_to_length(PROJECTILE_SPEED)
+            
+            projectile_pos = Position(self.position.x + self.size/2, self.position.y + self.size/2)
+            return Projectile(projectile_pos, direction)
+        return None
+
+class Enemy(GameObject):
+    def __init__(self, position: Position):
+        super().__init__(position, ENEMY_SIZE)
+        self.color = ENEMY_COLOR
+        self.shoot_cooldown = random.randint(30, 120)  # Random initial cooldown
+    
+    def update(self):
+        super().update()
+        if self.shoot_cooldown > 0:
+            self.shoot_cooldown -= 1
+    
+    def draw(self, screen):
+        pygame.draw.rect(screen, self.color, 
+                        (self.position.x, self.position.y, self.size, self.size))
+        # Draw a simple indicator
+        pygame.draw.circle(screen, (255, 255, 255), 
+                          (int(self.position.x + self.size/2), int(self.position.y + self.size/2)), 
+                          6, 1)
+    
+    def shoot(self, target: Position) -> Optional['Projectile']:
+        if self.shoot_cooldown <= 0:
+            self.shoot_cooldown = random.randint(60, 180)
+            direction = pygame.Vector2(target.x - (self.position.x + self.size/2),
+                                     target.y - (self.position.y + self.size/2))
+            direction.scale_to_length(PROJECTILE_SPEED)
+            
+            projectile_pos = Position(self.position.x + self.size/2, self.position.y + self.size/2)
+            return Projectile(projectile_pos, direction)
+        return None
+
+class Projectile(GameObject):
+    def __init__(self, position: Position, velocity: Velocity):
+        super().__init__(position, PROJECTILE_SIZE)
+        self.velocity = velocity
+        self.color = PROJECTILE_COLOR
+    
+    def update(self):
+        super().update()
+        # Remove if out of bounds
+        if (self.position.x < -self.size or self.position.x > SCREEN_WIDTH + self.size or
+            self.position.y < -self.size or self.position.y > SCREEN_HEIGHT + self.size):
+            self.alive = False
+    
+    def draw(self, screen):
+        pygame.draw.circle(screen, self.color, 
+                          (int(self.position.x), int(self.position.y)), 
+                          self.size)
 
 class Game:
-    """Main game class that manages the game state."""
-    
     def __init__(self):
+        self.screen = None
+        self.clock = None
+        self.running = False
+        
+        # Game objects
+        self.player = None
+        self.enemies: List[Enemy] = []
+        self.projectiles: List[Projectile] = []
+        self.spawn_timer = 0
+        self.score = 0
+        self.game_over = False
+        
+        # Initialize Pygame
         try:
+            pygame.init()
             self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-            pygame.display.set_caption("Snake Game")
+            pygame.display.set_caption("AI vs AI Battle")
             self.clock = pygame.time.Clock()
-            self.font = pygame.font.Font(None, 36)
-            self.snake = Snake()
-            self.food = Food()
-            self.game_over = False
-        except pygame.error as e:
-            logger.error(f"Failed to initialize game: {e}")
+            logger.info("Pygame initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Pygame: {e}")
             raise
+    
+    def setup(self):
+        """Initialize game objects"""
+        try:
+            # Create player at center
+            self.player = Player(Position(SCREEN_WIDTH/2 - PLAYER_SIZE/2, SCREEN_HEIGHT/2 - PLAYER_SIZE/2))
             
+            # Clear lists
+            self.enemies.clear()
+            self.projectiles.clear()
+            
+            # Reset game state
+            self.score = 0
+            self.game_over = False
+            self.spawn_timer = 0
+            
+            logger.info("Game setup completed")
+        except Exception as e:
+            logger.error(f"Failed to setup game: {e}")
+            raise
+    
     def handle_events(self):
-        """Handle user input events."""
+        """Handle pygame events"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return False
+                self.running = False
             elif event.type == pygame.KEYDOWN:
-                if self.game_over and event.key == pygame.K_SPACE:
-                    self.snake.reset()
-                    self.food.randomize_position()
-                    self.game_over = False
-                elif not self.game_over:
-                    if event.key == pygame.K_UP and self.snake.direction != (0, 1):
-                        self.snake.direction = (0, -1)
-                    elif event.key == pygame.K_DOWN and self.snake.direction != (0, -1):
-                        self.snake.direction = (0, 1)
-                    elif event.key == pygame.K_LEFT and self.snake.direction != (1, 0):
-                        self.snake.direction = (-1, 0)
-                    elif event.key == pygame.K_RIGHT and self.snake.direction != (-1, 0):
-                        self.snake.direction = (1, 0)
-        return True
-        
-    def update(self):
-        """Update game state."""
-        if self.game_over:
-            return
-            
-        # Update snake position
-        if not self.snake.update():
-            self.game_over = True
-            return
-            
-        # Check for food collision
-        if self.snake.get_head_position() == self.food.position:
-            self.snake.grow()
-            self.food.randomize_position()
-            # Make sure food doesn't appear on snake
-            while self.food.position in self.snake.positions:
-                self.food.randomize_position()
-                
-    def render(self):
-        """Draw everything to the screen."""
-        self.screen.fill(BLACK)
-        
-        if not self.game_over:
-            self.snake.render(self.screen)
-            self.food.render(self.screen)
-            
-            # Draw score
-            score_text = self.font.render(f"Score: {self.snake.score}", True, WHITE)
-            self.screen.blit(score_text, (10, 10))
-        else:
-            # Draw game over screen
-            game_over_text = self.font.render("GAME OVER", True, WHITE)
-            restart_text = self.font.render("Press SPACE to restart", True, WHITE)
-            score_text = self.font.render(f"Final Score: {self.snake.score}", True, WHITE)
-            
-            game_over_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 40))
-            score_rect = score_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
-            restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 40))
-            
-            self.screen.blit(game_over_text, game_over_rect)
-            self.screen.blit(score_text, score_rect)
-            self.screen.blit(restart_text, restart_rect)
-            
-        pygame.display.flip()
-        
-    def run(self):
-        """Main game loop."""
-        running = True
+                if event.key == pygame.K_ESCAPE:
+                    self.running = False
+                elif event.key == pygame.K_r and self.game_over:
+                    self.setup()
+    
+    def update_player_ai(self):
+        """Simple AI for player movement"""
         try:
-            while running:
-                running = self.handle_events()
-                self.update()
-                self.render()
-                self.clock.tick(FPS)
+            # Move towards center of enemies
+            if not self.enemies:
+                return
+            
+            # Calculate average position of enemies
+            avg_x = sum(enemy.position.x for enemy in self.enemies) / len(self.enemies)
+            avg_y = sum(enemy.position.y for enemy in self.enemies) / len(self.enemies)
+            
+            # Move towards enemies with some randomness
+            dx = avg_x - (self.player.position.x + PLAYER_SIZE/2)
+            dy = avg_y - (self.player.position.y + PLAYER_SIZE/2)
+            
+            # Normalize and apply speed
+            distance = math.sqrt(dx*dx + dy*dy)
+            if distance > 0:
+                dx /= distance
+                dy /= distance
+                
+                self.player.velocity.dx = dx * PLAYER_SPEED * 0.7
+                self.player.velocity.dy = dy * PLAYER_SPEED * 0.7
+            
+            # Random movement for unpredictability
+            self.player.velocity.dx += random.uniform(-0.5, 0.5)
+            self.player.velocity.dy += random.uniform(-0.5, 0.5)
+            
+            # Keep within bounds
+            if abs(self.player.velocity.dx) > PLAYER_SPEED:
+                self.player.velocity.dx = math.copysign(PLAYER_SPEED, self.player.velocity.dx)
+            if abs(self.player.velocity.dy) > PLAYER_SPEED:
+                self.player.velocity.dy = math.copysign(PLAYER_SPEED, self.player.velocity.dy)
+                
         except Exception as e:
-            logger.error(f"Error in game loop: {e}")
+            logger.error(f"Error in player AI update: {e}")
+    
+    def update_enemy_ai(self):
+        """Simple AI for enemies"""
+        try:
+            if not self.player:
+                return
+            
+            # Each enemy moves toward the player
+            for enemy in self.enemies:
+                dx = (self.player.position.x + PLAYER_SIZE/2) - (enemy.position.x + ENEMY_SIZE/2)
+                dy = (self.player.position.y + PLAYER_SIZE/2) - (enemy.position.y + ENEMY_SIZE/2)
+                
+                # Normalize and apply speed
+                distance = math.sqrt(dx*dx + dy*dy)
+                if distance > 0:
+                    dx /= distance
+                    dy /= distance
+                    
+                    enemy.velocity.dx = dx * ENEMY_SPEED
+                    enemy.velocity.dy = dy * ENEMY_SPEED
+                
+                # Occasionally shoot at player
+                if random.randint(1, 60) == 1:  # 1 in 60 chance each frame
+                    projectile = enemy.shoot(Position(self.player.position.x + PLAYER_SIZE/2,
+                                                     self.player.position.y + PLAYER_SIZE/2))
+                    if projectile:
+                        self.projectiles.append(projectile)
+                        
+        except Exception as e:
+            logger.error(f"Error in enemy AI update: {e}")
+    
+    def spawn_enemies(self):
+        """Spawn new enemies"""
+        try:
+            if len(self.enemies) < MAX_ENEMIES and self.spawn_timer <= 0:
+                # Spawn from edges
+                side = random.choice(['top', 'bottom', 'left', 'right'])
+                if side == 'top':
+                    pos = Position(random.randint(0, SCREEN_WIDTH), -ENEMY_SIZE)
+                elif side == 'bottom':
+                    pos = Position(random.randint(0, SCREEN_WIDTH), SCREEN_HEIGHT)
+                elif side == 'left':
+                    pos = Position(-ENEMY_SIZE, random.randint(0, SCREEN_HEIGHT))
+                else:  # right
+                    pos = Position(SCREEN_WIDTH, random.randint(0, SCREEN_HEIGHT))
+                
+                self.enemies.append(Enemy(pos))
+                self.spawn_timer = SPAWN_RATE
+            elif self.spawn_timer > 0:
+                self.spawn_timer -= 1
+                
+        except Exception as e:
+            logger.error(f"Error spawning enemies: {e}")
+    
+    def update_projectiles(self):
+        """Update all projectiles"""
+        try:
+            for projectile in self.projectiles[:]:  # Iterate over a copy
+                projectile.update()
+                if not projectile.alive:
+                    self.projectiles.remove(projectile)
+                    
+        except Exception as e:
+            logger.error(f"Error updating projectiles: {e}")
+    
+    def check_collisions(self):
+        """Check for collisions between game objects"""
+        try:
+            # Player vs enemies
+            if self.player:
+                player_rect = self.player.get_rect()
+                for enemy in self.enemies[:]:  # Iterate over a copy
+                    if player_rect.colliderect(enemy.get_rect()):
+                        # Collision with enemy - game over
+                        self.game_over = True
+                        logger.info("Game Over: Player hit by enemy")
+            
+            # Projectiles vs enemies
+            for projectile in self.projectiles[:]:  # Iterate over a copy
+                if not projectile.alive:
+                    continue
+                    
+                projectile_rect = projectile.get_rect()
+                for enemy in self.enemies[:]:  # Iterate over a copy
+                    if projectile_rect.colliderect(enemy.get_rect()):
+                        # Hit enemy
+                        self.enemies.remove(enemy)
+                        projectile.alive = False
+                        self.score += 10
+                        break
+                        
+            # Projectiles vs player
+            if self.player:
+                player_rect = self.player.get_rect()
+                for projectile in self.projectiles[:]:  # Iterate over a copy
+                    if projectile_rect.colliderect(player_rect):
+                        # Hit player - game over
+                        self.game_over = True
+                        logger.info("Game Over: Player hit by projectile")
+                        projectile.alive = False
+                        
+        except Exception as e:
+            logger.error(f"Error checking collisions: {e}")
+    
+    def update(self):
+        """Update game state"""
+        try:
+            if self.game_over:
+                return
+                
+            # Update AI
+            self.update_player_ai()
+            self.update_enemy_ai()
+            
+            # Spawn enemies
+            self.spawn_enemies()
+            
+            # Update all objects
+            self.player.update()
+            for enemy in self.enemies:
+                enemy.update()
+            self.update_projectiles()
+            
+            # Check collisions
+            self.check_collisions()
+            
+        except Exception as e:
+            logger.error(f"Error updating game: {e}")
+    
+    def draw(self):
+        """Draw everything"""
+        try:
+            # Clear screen
+            self.screen.fill(BACKGROUND_COLOR)
+            
+            # Draw game objects
+            if self.player:
+                self.player.draw(self.screen)
+                
+            for enemy in self.enemies:
+                enemy.draw(self.screen)
+                
+            for projectile in self.projectiles:
+                projectile.draw(self.screen)
+            
+            # Draw UI
+            font = pygame.font.Font(None, 36)
+            score_text = font.render(f"Score: {self.score}", True, TEXT_COLOR)
+            self.screen.blit(score_text, (10, 10))
+            
+            if self.game_over:
+                game_over_font = pygame.font.Font(None, 72)
+                game_over_text = game_over_font.render("GAME OVER", True, (255, 50, 50))
+                restart_text = font.render("Press R to Restart", True, TEXT_COLOR)
+                
+                text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 30))
+                restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 30))
+                
+                self.screen.blit(game_over_text, text_rect)
+                self.screen.blit(restart_text, restart_rect)
+            
+            pygame.display.flip()
+            
+        except Exception as e:
+            logger.error(f"Error drawing game: {e}")
+    
+    def run(self):
+        """Main game loop"""
+        try:
+            self.running = True
+            self.setup()
+            
+            while self.running:
+                self.handle_events()
+                self.update()
+                self.draw()
+                self.clock.tick(FPS)
+                
+        except Exception as e:
+            logger.error(f"Error in main game loop: {e}")
             raise
         finally:
             pygame.quit()
+            logger.info("Game terminated")
 
 def main():
-    """Main entry point for the application."""
+    """Main entry point"""
     try:
-        logger.info("Starting Snake Game")
+        logger.info("Starting AI vs AI Battle game")
         game = Game()
         game.run()
-        logger.info("Snake Game ended")
+        logger.info("Game completed successfully")
     except Exception as e:
-        logger.error(f"Application error: {e}")
+        logger.error(f"Fatal error in main: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
