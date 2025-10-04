@@ -1,3 +1,4 @@
+```python
 import pygame
 import sys
 import random
@@ -5,6 +6,7 @@ import logging
 import math
 from typing import Tuple, List, Optional
 from dataclasses import dataclass
+from enum import Enum
 
 # Configure logging
 logging.basicConfig(
@@ -22,7 +24,7 @@ logger = logging.getLogger(__name__)
 SCREEN_WIDTH = 1000
 SCREEN_HEIGHT = 700
 FPS = 60
-BACKGROUND_COLOR = (20, 20, 30)
+BACKGROUND_COLOR = (10, 10, 20)
 PLAYER_COLOR = (0, 200, 255)
 ENEMY_COLOR = (255, 50, 50)
 PROJECTILE_COLOR = (255, 255, 100)
@@ -36,6 +38,11 @@ PROJECTILE_SPEED = 8
 MAX_PROJECTILES = 10
 SPAWN_RATE = 60  # frames between enemy spawns
 MAX_ENEMIES = 15
+
+class GameState(Enum):
+    MENU = "menu"
+    PLAYING = "playing"
+    GAME_OVER = "game_over"
 
 @dataclass
 class Position:
@@ -81,366 +88,440 @@ class Player(GameObject):
         super().__init__(position, PLAYER_SIZE)
         self.color = PLAYER_COLOR
         self.shoot_cooldown = 0
+        self.max_health = 100
+        self.health = self.max_health
+        self.score = 0
+        self.level = 1
+        self.experience = 0
+        self.shoot_power = 1
     
     def update(self):
         super().update()
         if self.shoot_cooldown > 0:
             self.shoot_cooldown -= 1
     
-    def draw(self, screen):
-        pygame.draw.rect(screen, self.color, 
-                        (self.position.x, self.position.y, self.size, self.size))
-        # Draw a simple indicator
-        pygame.draw.circle(screen, (255, 255, 255), 
-                          (int(self.position.x + self.size/2), int(self.position.y + self.size/2)), 
-                          8, 2)
-    
-    def shoot(self, target: Position) -> Optional['Projectile']:
+    def shoot(self, target_pos: Position) -> Optional[object]:
         if self.shoot_cooldown <= 0:
-            self.shoot_cooldown = 15
-            direction = pygame.Vector2(target.x - (self.position.x + self.size/2),
-                                     target.y - (self.position.y + self.size/2))
-            direction.scale_to_length(PROJECTILE_SPEED)
+            self.shoot_cooldown = 15 // self.level  # Faster shooting at higher levels
+            dx = target_pos.x - (self.position.x + self.size/2)
+            dy = target_pos.y - (self.position.y + self.size/2)
+            distance = max(1, math.sqrt(dx*dx + dy*dy))
+            dx /= distance
+            dy /= distance
             
-            projectile_pos = Position(self.position.x + self.size/2, self.position.y + self.size/2)
-            return Projectile(projectile_pos, direction)
+            # Create projectile with enhanced properties based on level
+            projectile = Projectile(
+                Position(self.position.x + self.size/2, self.position.y + self.size/2),
+                Velocity(dx * PROJECTILE_SPEED * self.shoot_power, dy * PROJECTILE_SPEED * self.shoot_power),
+                self.level
+            )
+            return projectile
         return None
+    
+    def draw(self, screen):
+        # Draw player with health bar
+        super().draw(screen)
+        pygame.draw.rect(screen, (0, 100, 0), 
+                        (self.position.x, self.position.y - 10, self.size, 5))
+        pygame.draw.rect(screen, (255, 0, 0), 
+                        (self.position.x, self.position.y - 10, 
+                         self.size * self.health / self.max_health, 5))
+        
+        # Draw level indicator
+        font = pygame.font.Font(None, 24)
+        level_text = font.render(f"Lv.{self.level}", True, TEXT_COLOR)
+        screen.blit(level_text, (self.position.x + self.size/2 - 10, self.position.y - 25))
 
 class Enemy(GameObject):
     def __init__(self, position: Position):
         super().__init__(position, ENEMY_SIZE)
         self.color = ENEMY_COLOR
-        self.shoot_cooldown = random.randint(30, 120)  # Random initial cooldown
+        self.max_health = 30
+        self.health = self.max_health
+        self.speed = ENEMY_SPEED
+        self.shoot_cooldown = 0
+        self.damage = 10
+        self.reward = 10
     
     def update(self):
         super().update()
         if self.shoot_cooldown > 0:
             self.shoot_cooldown -= 1
     
-    def draw(self, screen):
-        pygame.draw.rect(screen, self.color, 
-                        (self.position.x, self.position.y, self.size, self.size))
-        # Draw a simple indicator
-        pygame.draw.circle(screen, (255, 255, 255), 
-                          (int(self.position.x + self.size/2), int(self.position.y + self.size/2)), 
-                          6, 1)
-    
-    def shoot(self, target: Position) -> Optional['Projectile']:
+    def shoot(self, target_pos: Position) -> Optional[object]:
         if self.shoot_cooldown <= 0:
-            self.shoot_cooldown = random.randint(60, 180)
-            direction = pygame.Vector2(target.x - (self.position.x + self.size/2),
-                                     target.y - (self.position.y + self.size/2))
-            direction.scale_to_length(PROJECTILE_SPEED)
+            self.shoot_cooldown = random.randint(60, 120)  # Random shooting cooldown
+            dx = target_pos.x - (self.position.x + self.size/2)
+            dy = target_pos.y - (self.position.y + self.size/2)
+            distance = max(1, math.sqrt(dx*dx + dy*dy))
+            dx /= distance
+            dy /= distance
             
-            projectile_pos = Position(self.position.x + self.size/2, self.position.y + self.size/2)
-            return Projectile(projectile_pos, direction)
+            projectile = Projectile(
+                Position(self.position.x + self.size/2, self.position.y + self.size/2),
+                Velocity(dx * PROJECTILE_SPEED, dy * PROJECTILE_SPEED),
+                0  # Enemy projectiles don't have level
+            )
+            return projectile
         return None
 
 class Projectile(GameObject):
-    def __init__(self, position: Position, velocity: Velocity):
+    def __init__(self, position: Position, velocity: Velocity, level: int = 0):
         super().__init__(position, PROJECTILE_SIZE)
         self.velocity = velocity
-        self.color = PROJECTILE_COLOR
+        self.level = level
+        self.damage = max(1, 5 + level * 2)  # Damage increases with level
+        self.lifetime = 300  # Frames until projectile disappears
+        self.size = PROJECTILE_SIZE + level  # Larger projectiles at higher levels
     
     def update(self):
         super().update()
-        # Remove if out of bounds
-        if (self.position.x < -self.size or self.position.x > SCREEN_WIDTH + self.size or
-            self.position.y < -self.size or self.position.y > SCREEN_HEIGHT + self.size):
+        self.lifetime -= 1
+        if self.lifetime <= 0:
             self.alive = False
+
+class Particle:
+    def __init__(self, x: float, y: float, color: Tuple[int, int, int], size: int = 3):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.size = size
+        self.lifetime = random.randint(20, 50)
+        self.vx = random.uniform(-2, 2)
+        self.vy = random.uniform(-2, 2)
+    
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.lifetime -= 1
+        self.size = max(0, self.size - 0.1)
     
     def draw(self, screen):
-        pygame.draw.circle(screen, self.color, 
-                          (int(self.position.x), int(self.position.y)), 
-                          self.size)
+        if self.lifetime > 0:
+            pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), int(self.size))
 
 class Game:
     def __init__(self):
-        self.screen = None
-        self.clock = None
-        self.running = False
-        
-        # Game objects
+        pygame.init()
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption("AI vs AI Battle")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.Font(None, 36)
+        self.small_font = pygame.font.Font(None, 24)
+        self.particles: List[Particle] = []
+        self.state = GameState.MENU
         self.player = None
         self.enemies: List[Enemy] = []
         self.projectiles: List[Projectile] = []
         self.spawn_timer = 0
+        self.wave_number = 1
         self.score = 0
-        self.game_over = False
-        
-        # Initialize Pygame
-        try:
-            pygame.init()
-            self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-            pygame.display.set_caption("AI vs AI Battle")
-            self.clock = pygame.time.Clock()
-            logger.info("Pygame initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize Pygame: {e}")
-            raise
+        self.high_score = 0
     
     def setup(self):
         """Initialize game objects"""
-        try:
-            # Create player at center
-            self.player = Player(Position(SCREEN_WIDTH/2 - PLAYER_SIZE/2, SCREEN_HEIGHT/2 - PLAYER_SIZE/2))
-            
-            # Clear lists
-            self.enemies.clear()
-            self.projectiles.clear()
-            
-            # Reset game state
-            self.score = 0
-            self.game_over = False
-            self.spawn_timer = 0
-            
-            logger.info("Game setup completed")
-        except Exception as e:
-            logger.error(f"Failed to setup game: {e}")
-            raise
+        self.player = Player(Position(SCREEN_WIDTH/2, SCREEN_HEIGHT/2))
+        self.enemies.clear()
+        self.projectiles.clear()
+        self.particles.clear()
+        self.spawn_timer = 0
+        self.wave_number = 1
+        self.score = 0
     
-    def handle_events(self):
-        """Handle pygame events"""
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    self.running = False
-                elif event.key == pygame.K_r and self.game_over:
-                    self.setup()
+    def spawn_enemies(self):
+        """Spawn new enemies for current wave"""
+        if len(self.enemies) < MAX_ENEMIES and self.spawn_timer <= 0:
+            # Spawn from edges with increasing difficulty
+            side = random.choice(['top', 'bottom', 'left', 'right'])
+            if side == 'top':
+                pos = Position(random.randint(0, SCREEN_WIDTH), -ENEMY_SIZE)
+            elif side == 'bottom':
+                pos = Position(random.randint(0, SCREEN_WIDTH), SCREEN_HEIGHT)
+            elif side == 'left':
+                pos = Position(-ENEMY_SIZE, random.randint(0, SCREEN_HEIGHT))
+            else:  # right
+                pos = Position(SCREEN_WIDTH, random.randint(0, SCREEN_HEIGHT))
+            
+            enemy = Enemy(pos)
+            # Increase difficulty with wave number
+            enemy.max_health += self.wave_number * 5
+            enemy.health = enemy.max_health
+            enemy.speed += self.wave_number * 0.2
+            enemy.reward = max(10, 10 + self.wave_number * 2)
+            
+            self.enemies.append(enemy)
+            self.spawn_timer = max(10, SPAWN_RATE - self.wave_number * 5)  # Spawn faster as waves progress
+        elif self.spawn_timer > 0:
+            self.spawn_timer -= 1
     
     def update_player_ai(self):
         """Simple AI for player movement"""
-        try:
-            # Move towards center of enemies
-            if not self.enemies:
-                return
+        if not self.player or self.player.health <= 0:
+            return
             
-            # Calculate average position of enemies
-            avg_x = sum(enemy.position.x for enemy in self.enemies) / len(self.enemies)
-            avg_y = sum(enemy.position.y for enemy in self.enemies) / len(self.enemies)
+        # Move toward nearest enemy with some randomness
+        if self.enemies:
+            nearest_enemy = min(self.enemies, key=lambda e: 
+                              math.sqrt((e.position.x - self.player.position.x)**2 + 
+                                       (e.position.y - self.player.position.y)**2))
             
-            # Move towards enemies with some randomness
-            dx = avg_x - (self.player.position.x + PLAYER_SIZE/2)
-            dy = avg_y - (self.player.position.y + PLAYER_SIZE/2)
+            dx = nearest_enemy.position.x - self.player.position.x
+            dy = nearest_enemy.position.y - self.player.position.y
             
             # Normalize and apply speed
-            distance = math.sqrt(dx*dx + dy*dy)
+            distance = max(1, math.sqrt(dx*dx + dy*dy))
+            dx /= distance
+            dy /= distance
+            
+            self.player.velocity.dx = dx * PLAYER_SPEED
+            self.player.velocity.dy = dy * PLAYER_SPEED
+            
+            # Shoot at enemy when close enough
+            if distance < 200 and random.randint(1, 30) == 1:
+                projectile = self.player.shoot(Position(nearest_enemy.position.x + ENEMY_SIZE/2,
+                                                       nearest_enemy.position.y + ENEMY_SIZE/2))
+                if projectile:
+                    self.projectiles.append(projectile)
+        else:
+            # Random movement when no enemies
+            self.player.velocity.dx = random.uniform(-PLAYER_SPEED, PLAYER_SPEED)
+            self.player.velocity.dy = random.uniform(-PLAYER_SPEED, PLAYER_SPEED)
+    
+    def update_enemy_ai(self):
+        """Simple AI for enemies"""
+        if not self.player or self.player.health <= 0:
+            return
+            
+        for enemy in self.enemies:
+            # Move toward player
+            dx = (self.player.position.x + PLAYER_SIZE/2) - (enemy.position.x + ENEMY_SIZE/2)
+            dy = (self.player.position.y + PLAYER_SIZE/2) - (enemy.position.y + ENEMY_SIZE/2)
+            
+            distance = max(1, math.sqrt(dx*dx + dy*dy))
             if distance > 0:
                 dx /= distance
                 dy /= distance
                 
-                self.player.velocity.dx = dx * PLAYER_SPEED * 0.7
-                self.player.velocity.dy = dy * PLAYER_SPEED * 0.7
+                enemy.velocity.dx = dx * enemy.speed
+                enemy.velocity.dy = dy * enemy.speed
             
-            # Random movement for unpredictability
-            self.player.velocity.dx += random.uniform(-0.5, 0.5)
-            self.player.velocity.dy += random.uniform(-0.5, 0.5)
-            
-            # Keep within bounds
-            if abs(self.player.velocity.dx) > PLAYER_SPEED:
-                self.player.velocity.dx = math.copysign(PLAYER_SPEED, self.player.velocity.dx)
-            if abs(self.player.velocity.dy) > PLAYER_SPEED:
-                self.player.velocity.dy = math.copysign(PLAYER_SPEED, self.player.velocity.dy)
-                
-        except Exception as e:
-            logger.error(f"Error in player AI update: {e}")
-    
-    def update_enemy_ai(self):
-        """Simple AI for enemies"""
-        try:
-            if not self.player:
-                return
-            
-            # Each enemy moves toward the player
-            for enemy in self.enemies:
-                dx = (self.player.position.x + PLAYER_SIZE/2) - (enemy.position.x + ENEMY_SIZE/2)
-                dy = (self.player.position.y + PLAYER_SIZE/2) - (enemy.position.y + ENEMY_SIZE/2)
-                
-                # Normalize and apply speed
-                distance = math.sqrt(dx*dx + dy*dy)
-                if distance > 0:
-                    dx /= distance
-                    dy /= distance
-                    
-                    enemy.velocity.dx = dx * ENEMY_SPEED
-                    enemy.velocity.dy = dy * ENEMY_SPEED
-                
-                # Occasionally shoot at player
-                if random.randint(1, 60) == 1:  # 1 in 60 chance each frame
-                    projectile = enemy.shoot(Position(self.player.position.x + PLAYER_SIZE/2,
-                                                     self.player.position.y + PLAYER_SIZE/2))
-                    if projectile:
-                        self.projectiles.append(projectile)
-                        
-        except Exception as e:
-            logger.error(f"Error in enemy AI update: {e}")
-    
-    def spawn_enemies(self):
-        """Spawn new enemies"""
-        try:
-            if len(self.enemies) < MAX_ENEMIES and self.spawn_timer <= 0:
-                # Spawn from edges
-                side = random.choice(['top', 'bottom', 'left', 'right'])
-                if side == 'top':
-                    pos = Position(random.randint(0, SCREEN_WIDTH), -ENEMY_SIZE)
-                elif side == 'bottom':
-                    pos = Position(random.randint(0, SCREEN_WIDTH), SCREEN_HEIGHT)
-                elif side == 'left':
-                    pos = Position(-ENEMY_SIZE, random.randint(0, SCREEN_HEIGHT))
-                else:  # right
-                    pos = Position(SCREEN_WIDTH, random.randint(0, SCREEN_HEIGHT))
-                
-                self.enemies.append(Enemy(pos))
-                self.spawn_timer = SPAWN_RATE
-            elif self.spawn_timer > 0:
-                self.spawn_timer -= 1
-                
-        except Exception as e:
-            logger.error(f"Error spawning enemies: {e}")
+            # Occasionally shoot at player
+            if random.randint(1, 60) == 1 and enemy.shoot_cooldown <= 0:
+                projectile = enemy.shoot(Position(self.player.position.x + PLAYER_SIZE/2,
+                                                 self.player.position.y + PLAYER_SIZE/2))
+                if projectile:
+                    self.projectiles.append(projectile)
     
     def update_projectiles(self):
         """Update all projectiles"""
-        try:
-            for projectile in self.projectiles[:]:  # Iterate over a copy
-                projectile.update()
-                if not projectile.alive:
-                    self.projectiles.remove(projectile)
-                    
-        except Exception as e:
-            logger.error(f"Error updating projectiles: {e}")
+        for projectile in self.projectiles[:]:  # Iterate over a copy
+            projectile.update()
+            if not projectile.alive:
+                self.projectiles.remove(projectile)
     
     def check_collisions(self):
         """Check for collisions between game objects"""
-        try:
-            # Player vs enemies
-            if self.player:
-                player_rect = self.player.get_rect()
-                for enemy in self.enemies[:]:  # Iterate over a copy
-                    if player_rect.colliderect(enemy.get_rect()):
-                        # Collision with enemy - game over
-                        self.game_over = True
-                        logger.info("Game Over: Player hit by enemy")
+        if not self.player or self.player.health <= 0:
+            return
             
-            # Projectiles vs enemies
-            for projectile in self.projectiles[:]:  # Iterate over a copy
-                if not projectile.alive:
-                    continue
-                    
-                projectile_rect = projectile.get_rect()
-                for enemy in self.enemies[:]:  # Iterate over a copy
-                    if projectile_rect.colliderect(enemy.get_rect()):
-                        # Hit enemy
-                        self.enemies.remove(enemy)
-                        projectile.alive = False
-                        self.score += 10
-                        break
-                        
-            # Projectiles vs player
-            if self.player:
-                player_rect = self.player.get_rect()
-                for projectile in self.projectiles[:]:  # Iterate over a copy
-                    if projectile_rect.colliderect(player_rect):
-                        # Hit player - game over
-                        self.game_over = True
-                        logger.info("Game Over: Player hit by projectile")
-                        projectile.alive = False
-                        
-        except Exception as e:
-            logger.error(f"Error checking collisions: {e}")
+        # Player vs enemies
+        for enemy in self.enemies[:]:
+            distance = math.sqrt((enemy.position.x - self.player.position.x)**2 + 
+                               (enemy.position.y - self.player.position.y)**2)
+            if distance < (self.player.size/2 + enemy.size/2):
+                self.player.health -= enemy.damage
+                # Create explosion particles
+                for _ in range(10):
+                    self.particles.append(Particle(
+                        enemy.position.x + enemy.size/2,
+                        enemy.position.y + enemy.size/2,
+                        (255, 0, 0)
+                    ))
+                self.enemies.remove(enemy)
+                
+                # Add score and check for level up
+                self.score += enemy.reward
+                if self.score > self.high_score:
+                    self.high_score = self.score
+                
+                # Level up every 100 points
+                new_level = self.score // 100 + 1
+                if new_level > self.player.level:
+                    self.player.level = new_level
+                    self.player.max_health += 20
+                    self.player.health = self.player.max_health
+        
+        # Projectiles vs player
+        for projectile in self.projectiles[:]:
+            if projectile.level == 0:  # Enemy projectile
+                distance = math.sqrt((projectile.position.x - self.player.position.x)**2 + 
+                                   (projectile.position.y - self.player.position.y)**2)
+                if distance < (self.player.size/2 + projectile.size/2):
+                    self.player.health -= projectile.damage
+                    self.projectiles.remove(projectile)
+                    # Create hit particles
+                    for _ in range(5):
+                        self.particles.append(Particle(
+                            projectile.position.x,
+                            projectile.position.y,
+                            (255, 255, 0)
+                        ))
+        
+        # Projectiles vs enemies
+        for enemy in self.enemies[:]:
+            for projectile in self.projectiles[:]:
+                if projectile.level > 0:  # Player projectile
+                    distance = math.sqrt((projectile.position.x - enemy.position.x)**2 + 
+                                       (projectile.position.y - enemy.position.y)**2)
+                    if distance < (enemy.size/2 + projectile.size/2):
+                        enemy.health -= projectile.damage
+                        self.projectiles.remove(projectile)
+                        # Create hit particles
+                        for _ in range(5):
+                            self.particles.append(Particle(
+                                projectile.position.x,
+                                projectile.position.y,
+                                (0, 255, 0)
+                            ))
+                        if enemy.health <= 0:
+                            self.enemies.remove(enemy)
+                            self.score += enemy.reward
+                            # Create explosion particles
+                            for _ in range(15):
+                                self.particles.append(Particle(
+                                    enemy.position.x + enemy.size/2,
+                                    enemy.position.y + enemy.size/2,
+                                    (255, 0, 0)
+                                ))
+    
+    def update_particles(self):
+        """Update and draw particles"""
+        for particle in self.particles[:]:
+            particle.update()
+            if particle.lifetime <= 0:
+                self.particles.remove(particle)
     
     def update(self):
-        """Update game state"""
-        try:
-            if self.game_over:
-                return
-                
-            # Update AI
+        """Main game update loop"""
+        if self.state == GameState.MENU:
+            # Simple menu logic - start game when space is pressed
+            pass
+        elif self.state == GameState.PLAYING:
             self.update_player_ai()
             self.update_enemy_ai()
-            
-            # Spawn enemies
             self.spawn_enemies()
-            
-            # Update all objects
-            self.player.update()
-            for enemy in self.enemies:
-                enemy.update()
             self.update_projectiles()
-            
-            # Check collisions
             self.check_collisions()
+            self.update_particles()
             
-        except Exception as e:
-            logger.error(f"Error updating game: {e}")
+            # Check if wave is complete
+            if not self.enemies and self.spawn_timer <= 0:
+                self.wave_number += 1
+                self.spawn_timer = 60  # Start next wave after delay
     
-    def draw(self):
-        """Draw everything"""
-        try:
-            # Clear screen
-            self.screen.fill(BACKGROUND_COLOR)
-            
-            # Draw game objects
-            if self.player:
-                self.player.draw(self.screen)
-                
-            for enemy in self.enemies:
-                enemy.draw(self.screen)
-                
-            for projectile in self.projectiles:
-                projectile.draw(self.screen)
-            
-            # Draw UI
-            font = pygame.font.Font(None, 36)
-            score_text = font.render(f"Score: {self.score}", True, TEXT_COLOR)
-            self.screen.blit(score_text, (10, 10))
-            
-            if self.game_over:
-                game_over_font = pygame.font.Font(None, 72)
-                game_over_text = game_over_font.render("GAME OVER", True, (255, 50, 50))
-                restart_text = font.render("Press R to Restart", True, TEXT_COLOR)
-                
-                text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 30))
-                restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 30))
-                
-                self.screen.blit(game_over_text, text_rect)
-                self.screen.blit(restart_text, restart_rect)
-            
-            pygame.display.flip()
-            
-        except Exception as e:
-            logger.error(f"Error drawing game: {e}")
+    def draw_menu(self):
+        """Draw main menu"""
+        self.screen.fill((0, 0, 0))
+        title_text = self.font.render("AI vs AI BATTLE", True, (255, 255, 255))
+        start_text = self.small_font.render("Press SPACE to Start", True, (255, 255, 255))
+        high_score_text = self.small_font.render(f"High Score: {self.high_score}", True, (255, 255, 255))
+        
+        self.screen.blit(title_text, (SCREEN_WIDTH/2 - title_text.get_width()/2, 100))
+        self.screen.blit(start_text, (SCREEN_WIDTH/2 - start_text.get_width()/2, 200))
+        self.screen.blit(high_score_text, (SCREEN_WIDTH/2 - high_score_text.get_width()/2, 250))
+    
+    def draw_game(self):
+        """Draw game elements"""
+        self.screen.fill((0, 0, 0))
+        
+        # Draw particles
+        for particle in self.particles:
+            particle.draw(self.screen)
+        
+        # Draw player
+        if self.player and self.player.health > 0:
+            self.player.draw(self.screen)
+        
+        # Draw enemies
+        for enemy in self.enemies:
+            pygame.draw.rect(self.screen, enemy.color, 
+                           (enemy.position.x, enemy.position.y, enemy.size, enemy.size))
+            # Health bar for enemies
+            pygame.draw.rect(self.screen, (0, 100, 0), 
+                           (enemy.position.x, enemy.position.y - 8, enemy.size, 4))
+            pygame.draw.rect(self.screen, (255, 0, 0), 
+                           (enemy.position.x, enemy.position.y - 8, 
+                            enemy.size * enemy.health / enemy.max_health, 4))
+        
+        # Draw projectiles
+        for projectile in self.projectiles:
+            color = (255, 255, 0) if projectile.level > 0 else (255, 0, 0)
+            pygame.draw.circle(self.screen, color, 
+                             (int(projectile.position.x), int(projectile.position.y)), 
+                             projectile.size)
+        
+        # Draw UI
+        score_text = self.small_font.render(f"Score: {self.score}", True, (255, 255, 255))
+        wave_text = self.small_font.render(f"Wave: {self.wave_number}", True, (255, 255, 255))
+        health_text = self.small_font.render(f"Health: {self.player.health}", True, (255, 255, 255))
+        
+        self.screen.blit(score_text, (10, 10))
+        self.screen.blit(wave_text, (10, 35))
+        self.screen.blit(health_text, (10, 60))
+    
+    def draw_game_over(self):
+        """Draw game over screen"""
+        self.screen.fill((0, 0, 0))
+        game_over_text = self.font.render("GAME OVER", True, (255, 0, 0))
+        score_text = self.small_font.render(f"Final Score: {self.score}", True, (255, 255, 255))
+        high_score_text = self.small_font.render(f"High Score: {self.high_score}", True, (255, 255, 255))
+        restart_text = self.small_font.render("Press R to Restart", True, (255, 255, 255))
+        
+        self.screen.blit(game_over_text, (SCREEN_WIDTH/2 - game_over_text.get_width()/2, 100))
+        self.screen.blit(score_text, (SCREEN_WIDTH/2 - score_text.get_width()/2, 200))
+        self.screen.blit(high_score_text, (SCREEN_WIDTH/2 - high_score_text.get_width()/2, 230))
+        self.screen.blit(restart_text, (SCREEN_WIDTH/2 - restart_text.get_width()/2, 300))
     
     def run(self):
         """Main game loop"""
-        try:
-            self.running = True
-            self.setup()
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE and self.state == GameState.MENU:
+                        self.state = GameState.PLAYING
+                        self.setup()
+                    elif event.key == pygame.K_r and self.state == GameState.PLAYING:
+                        self.state = GameState.MENU
+                    elif event.key == pygame.K_ESCAPE:
+                        running = False
             
-            while self.running:
-                self.handle_events()
+            # Update game state
+            if self.state == GameState.PLAYING:
                 self.update()
-                self.draw()
-                self.clock.tick(FPS)
                 
-        except Exception as e:
-            logger.error(f"Error in main game loop: {e}")
-            raise
-        finally:
-            pygame.quit()
-            logger.info("Game terminated")
+                # Check for game over condition
+                if self.player and self.player.health <= 0:
+                    self.state = GameState.PLAYING  # Continue showing game over screen
+            
+            # Draw everything
+            if self.state == GameState.MENU:
+                self.draw_menu()
+            elif self.state == GameState.PLAYING:
+                self.draw_game()
+            else:
+                self.draw_game_over()
+            
+            pygame.display.flip()
+            self.clock.tick(60)
+        
+        pygame.quit()
 
 def main():
-    """Main entry point"""
-    try:
-        logger.info("Starting AI vs AI Battle game")
-        game = Game()
-        game.run()
-        logger.info("Game completed successfully")
-    except Exception as e:
-        logger.error(f"Fatal error in main: {e}")
-        sys.exit(1)
+    game = Game()
+    game.run()
 
 if __name__ == "__main__":
     main()
