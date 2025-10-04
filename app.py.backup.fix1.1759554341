@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Snake Game with Two Players
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This module implements a simple Snake game that supports two players.
+Player 1 uses the arrow keys, while Player 2 uses the WASD keys.
+Both snakes share the same food and each has its own score.
+The game ends when either snake collides with a wall, itself, or the other snake.
+"""
+
+import sys
+import logging
+from typing import List, Tuple
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
+# Define colors
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+
+# Define grid size
+GRID_SIZE = 20  # Size of each grid cell in pixels
+GRID_WIDTH = 640 // GRID_SIZE
+GRID_HEIGHT = 480 // GRID_SIZE
+
+
+class Snake:
+    """Represents a snake in the game."""
+
+    def __init__(
+        self,
+        body: List[Tuple[int, int]] = None,
+        direction: Tuple[int, int] = None,
+    ):
+        """
+        Initialize a snake.
+
+        :param body: Initial body positions (list of (x, y) tuples). If None, defaults to center.
+        :param direction: Initial movement direction. If None, defaults to (0, -1).
+        """
+        if body is None:
+            # Default to center
+            body = [(GRID_WIDTH // 2, GRID_HEIGHT // 2)]
+        if direction is None:
+            direction = (0, -1)  # Default to moving up
+        self.body: List[Tuple[int, int]] = body
+        self.direction: Tuple[int, int] = direction
+        self.growing = False
+
+    def move(self) -> None:
+        """Move the snake in its current direction."""
+        head_x, head_y = self.body[0]
+        dir_x, dir_y = self.direction
+        new_head = (head_x + dir_x, head_y + dir_y)
+        self.body.insert(0, new_head)
+        if not self.growing:
+            self.body.pop()
+        else:
+            self.growing = False
+
+    def change_direction(self, new_direction: Tuple[int, int]) -> None:
+        """Change the snake's direction."""
+        # Prevent reversing directly
+        if (new_direction[0] == -self.direction[0] and new_direction[1] == -self.direction[1]):
+            return
+        self.direction = new_direction
+
+    def grow(self) -> None:
+        """Grow the snake by one segment."""
+        self.growing = True
+
+    def collides_with_self(self) -> bool:
+        """Check if the snake collides with itself."""
+        return self.body[0] in self.body[1:]
+
+    def collides_with_wall(self) -> bool:
+        """Check if the snake collides with the wall."""
+        head_x, head_y = self.body[0]
+        return not (0 <= head_x < GRID_WIDTH and 0 <= head_y < GRID_HEIGHT)
+
+
+class Food:
+    """Represents the food in the game."""
+
+    def __init__(self):
+        self.position: Tuple[int, int] = (0, 0)
+
+    def spawn(self, snake_bodies: List[Tuple[int, int]]) -> None:
+        """Spawn food at a random position not occupied by any snake."""
+        import random
+
+        while True:
+            x = random.randint(0, GRID_WIDTH - 1)
+            y = random.randint(0, GRID_HEIGHT - 1)
+            if (x, y) not in snake_bodies:
+                self.position = (x, y)
+                break
+
+
+class SnakeGame:
+    """Main game class handling two players."""
+
+    def __init__(self):
+        # Initialize snakes
+        self.snake1 = Snake()
+        self.snake2 = Snake(
+            body=[(GRID_WIDTH // 4, GRID_HEIGHT // 2)],
