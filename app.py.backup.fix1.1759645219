@@ -1,9 +1,8 @@
 import time
-import serial
 
 class Robot:
     def __init__(self):
-        self.arduino = serial.Serial("COM3", 9600)
+        self.arduino = ArduinoSerial("COM3")
 
     def move(self, direction, speed):
         if direction == "forward":
