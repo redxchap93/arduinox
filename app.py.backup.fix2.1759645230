@@ -3,7 +3,7 @@ import serial
 
 class Robot:
     def __init__(self):
-        self.arduino = serial.Serial("/dev/ttyACM0", 9600)
+        self.arduino = serial.Serial("COM3", 9600)
 
     def move(self, direction, speed):
         if direction == "forward":
