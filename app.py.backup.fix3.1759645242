@@ -1,0 +1,24 @@
+import time
+import serial
+
+class Robot:
+    def __init__(self):
+        self.arduino = serial.Serial("/dev/ttyACM0", 9600)
+
+    def move(self, direction, speed):
+        if direction == "forward":
+            self.arduino.write(b"F\n")
+        elif direction == "backward":
+            self.arduino.write(b"B\n")
+        else:
+            raise ValueError("Invalid direction")
+        time.sleep(speed)
+
+    def stop(self):
+        self.arduino.write(b"S\n")
+
+if __name__ == "__main__":
+    robot = Robot()
+    robot.move("forward", 10)
+    time.sleep(5)
+    robot.stop()
